@@ -157,7 +157,7 @@ def train_model(model, criterion, optimizer, train_loader, test_loader, device,b
     test_losses_mae = []  # Store test losses per epoch (MAE)
     test_maes = []  # Store test MAEs per epoch
 
-    lambda1 = 0.01
+
     for epoch in range(num_epochs):
         model.train()
         running_loss_mse = 0.0
@@ -173,12 +173,6 @@ def train_model(model, criterion, optimizer, train_loader, test_loader, device,b
             loss_mse = criterion(outputs, labels.float().unsqueeze(1))
             loss_mae = torch.mean(torch.abs(outputs.squeeze(1) - labels))
             absolute_errors = torch.abs(outputs.squeeze(1) - labels)
-
-            # L1 regularization
-            l1_regularization = torch.tensor(0.).to(device)
-            for param in model.parameters():
-                l1_regularization += torch.norm(param, 1)
-            loss_mse += lambda1 * l1_regularization
 
             running_loss_mse += loss_mse.item() * inputs.size(0)
             running_loss_mae += loss_mae.item() * inputs.size(0)
@@ -316,7 +310,7 @@ file_path = "chessData.csv"
 skip_rows = 0
 num_rows = 100000
 batch_size = 128
-num_epochs = 10
+num_epochs = 100
 lr = 0.001
 
 
@@ -378,7 +372,7 @@ def main():
     # Initialize model, loss function, and optimizer
     model = Net().to(device)
     criterion = nn.MSELoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.01, weight_decay=1e-6)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
 
     # Train the model
