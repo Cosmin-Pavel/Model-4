@@ -1,2 +1,4 @@
 chessData.csv
 plots
+__pycache__
+.idea
