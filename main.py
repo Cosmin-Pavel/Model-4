@@ -392,7 +392,10 @@ def main():
 
     end_time = time.time()  # Record end time
 
-    elapsed_time = end_time - start_time  # Calculate elapsed time
+    elapsed_time_seconds = end_time - start_time  # Calculate elapsed time
+    hours, remainder = divmod(elapsed_time_seconds, 3600)
+    minutes, seconds = divmod(remainder, 60)
+    elapsed_time = "{:02}:{:02}:{:02}".format(int(hours), int(minutes), int(seconds))
     print(f"Elapsed time: {elapsed_time} seconds")
 
     plot_actual_vs_predicted(model, train_loader, device, is_training=True)

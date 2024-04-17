@@ -1,4 +1,5 @@
 chessData.csv
 plots
-__pycache__
+__pycache__/*
 .idea
+.vscode
