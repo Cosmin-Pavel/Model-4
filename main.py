@@ -10,7 +10,8 @@ import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import datetime
 import time
-
+from constants import FILE_PATH, SKIP_ROWS, NUM_ROWS, BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE
+import math
 
 def import_chess_data(file_path, skip_rows=0, num_rows=None):
     try:
@@ -305,14 +306,14 @@ def plot_data(train_loader, model, device, optimizer, num_epochs, batch_size, lr
             filename_mse = f'plots/ValuesGraph-{name}-{timestamp}.png'
             plt.savefig(filename_mse)
             plt.show()
+            break
 
-
-file_path = "chessData.csv"
-skip_rows = 0
-num_rows = 100000
-batch_size = 128
-num_epochs = 100
-lr = 0.001
+file_path = FILE_PATH
+skip_rows = SKIP_ROWS
+num_rows = NUM_ROWS
+batch_size = BATCH_SIZE
+num_epochs = NUM_EPOCHS
+lr = LEARNING_RATE
 
 
 class ChessDataset(Dataset):
