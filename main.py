@@ -1,5 +1,5 @@
-
-from torch.utils.data import DataLoader,Dataset
+from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.utils.data import DataLoader, Dataset
 import random
 import re
 import numpy as np
@@ -12,6 +12,7 @@ import datetime
 import time
 from constants import FILE_PATH, SKIP_ROWS, NUM_ROWS, BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE
 import math
+
 
 def import_chess_data(file_path, skip_rows=0, num_rows=None):
     try:
@@ -28,6 +29,8 @@ def preprocess_data1(data):
     return fen_data, evaluation_data
 
 
+import pandas as pd
+
 def preprocess_data2(data):
     fen_data = data['FEN']
     evaluation_data = data['Evaluation']
@@ -40,10 +43,16 @@ def preprocess_data2(data):
             int_value = int(value)
             processed_evaluation.append(int_value)
         except ValueError:
-            # If conversion fails, check if second character is '+'
-            if len(value) >= 2 and value[1] == '+':
-                processed_evaluation.append(10000)
-            else:
+            # If conversion fails, extract the number after '#' and map it to [0, 100] interval
+            try:
+                pound_index = value.index('#')  # Find the index of '#'
+                num_str = value[pound_index + 1:]  # Extract the substring after '#'
+                num_value = int(num_str)  # Convert to integer
+                # Map the value from [-22, +22] to [0, 100]
+                processed_value = (num_value + 22) * (100 / 44)
+                processed_evaluation.append(processed_value)
+            except ValueError:
+                # If extraction fails, set a default value
                 processed_evaluation.append(-10000)
 
     # Convert processed_evaluation to a Pandas Series
@@ -52,10 +61,11 @@ def preprocess_data2(data):
     return fen_data, processed_evaluation_series
 
 
+
 def normalize_evaluation(evaluation_data):
     min_val = evaluation_data.min()
     max_val = evaluation_data.max()
-    normalized_data = (evaluation_data - min_val) / (max_val - min_val)
+    normalized_data = ((evaluation_data - min_val) / (max_val - min_val)) * 100
     return normalized_data
 
 
@@ -149,23 +159,12 @@ class Net(nn.Module):
         return x
 
 
-
-def train_model(model, criterion, optimizer, train_loader, test_loader, device,batch_size,train_size, test_size,num_epochs=10):
+def train_model(model, scheduler, criterion, optimizer, train_loader, test_loader, device, batch_size, train_size, test_size, num_epochs=10):
     train_losses_mse = []
-    train_losses_mae = []
-    train_maes = []
-
     test_losses_mse = []  # Store test losses per epoch (MSE)
-    test_losses_mae = []  # Store test losses per epoch (MAE)
-    test_maes = []  # Store test MAEs per epoch
-
 
     for epoch in range(num_epochs):
         model.train()
-        running_loss_mse = 0.0
-        running_loss_mae = 0.0
-        running_mae = 0.0
-        total_samples = 0
 
         # Training phase
         for inputs, labels in train_loader:
@@ -173,41 +172,29 @@ def train_model(model, criterion, optimizer, train_loader, test_loader, device,b
             optimizer.zero_grad()
             outputs = model(inputs)
             loss_mse = criterion(outputs, labels.float().unsqueeze(1))
-            loss_mae = torch.mean(torch.abs(outputs.squeeze(1) - labels))
-            absolute_errors = torch.abs(outputs.squeeze(1) - labels)
-
-            running_loss_mse += loss_mse.item() * inputs.size(0)
-            running_loss_mae += loss_mae.item() * inputs.size(0)
-            running_mae += torch.sum(absolute_errors).item()
-            total_samples += labels.size(0)
             loss_mse.backward()
             optimizer.step()
 
-
-        epoch_loss_mse = running_loss_mse / total_samples
-        epoch_loss_mae = running_loss_mae / total_samples
-        epoch_mae = running_mae / total_samples
-        train_losses_mse.append(epoch_loss_mse)
-        train_losses_mae.append(epoch_loss_mae)
-        train_maes.append(epoch_mae)
-
+        # Evaluate model on training data
+        train_loss_mse = evaluate_model(model, criterion, train_loader, device)
+        train_losses_mse.append(train_loss_mse)
 
         # Evaluate model on test data
-        test_loss_mse, test_loss_mae, test_mae = evaluate_model(model, criterion, test_loader, device)
+        test_loss_mse = evaluate_model(model, criterion, test_loader, device)
         test_losses_mse.append(test_loss_mse)
-        test_losses_mae.append(test_loss_mae)
-        test_maes.append(test_mae)
+
+        print(f"Epoch {epoch + 1}/{num_epochs}, Train Loss (MSE): {train_loss_mse:.4f}, Test Loss (MSE): {test_loss_mse:.4f}")
+
+        # Update learning rate
+        scheduler.step(test_loss_mse)
+
+    plot_learning_curves(train_losses_mse, test_losses_mse, optimizer, num_epochs, batch_size, train_size, test_size)
+
+    return train_losses_mse, test_losses_mse
 
 
-        print(
-            f"Epoch {epoch + 1}/{num_epochs}, Train Loss (MSE): {epoch_loss_mse:.4f}, Train Loss (MAE): {epoch_loss_mae:.4f} \t Test Loss (MSE): {test_loss_mse:.4f}, Test Loss (MAE): {test_loss_mae:.4f}")
-
-    plot_learning_curves(train_losses_mse, test_losses_mse, train_losses_mae, test_losses_mae, optimizer, num_epochs,batch_size,train_size, test_size)
-
-    return train_losses_mse, test_losses_mse, train_losses_mae, test_losses_mae, train_maes
-
-
-def plot_learning_curves(train_losses_mse, test_losses_mse, train_losses_mae, test_losses_mae, optimizer, num_epochs, batch_size,train_size, test_size):
+def plot_learning_curves(train_losses_mse, test_losses_mse,
+                         optimizer, num_epochs, batch_size, train_size, test_size):
     plt.figure(figsize=(12, 6))
 
     # Plotting MSE learning curves
@@ -232,33 +219,11 @@ def plot_learning_curves(train_losses_mse, test_losses_mse, train_losses_mae, te
     plt.savefig(filename_mse)
     plt.show()
 
-    plt.figure(figsize=(12, 6))
 
-    # Plotting MAE learning curves
-    plt.plot(range(1, num_epochs + 1), train_losses_mae, label='Training Loss (MAE)')
-    plt.plot(range(1, num_epochs + 1), test_losses_mae, label='Test Loss (MAE)')
-    plt.xlabel('Epochs')
-    plt.ylabel('Loss')
-    plt.title('MAE Learning Curves')
-    plt.legend()
-
-    # Add model information as text on the right side
-    plt.text(1.02, 0.5, text, horizontalalignment='left', verticalalignment='center', transform=plt.gca().transAxes)
-
-    # Adjust layout to fit the text and plot within the image
-    plt.subplots_adjust(right=0.7)  # Adjust the space on the right for the text
-    plt.margins(0.2)  # Add some margin around the plot
-
-    # Generate a unique filename with timestamp
-    filename_mae = f'plots/mae_learning_curves_{timestamp}.png'
-    plt.savefig(filename_mae)
-    plt.show()
 
 def evaluate_model(model, criterion, test_loader, device):
     model.eval()
     running_loss_mse = 0.0
-    running_loss_mae = 0.0
-    running_mae = 0.0
     total_samples = 0
 
     with torch.no_grad():
@@ -266,20 +231,11 @@ def evaluate_model(model, criterion, test_loader, device):
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = model(inputs)
             loss_mse = criterion(outputs, labels.float().unsqueeze(1))
-            loss_mae = torch.mean(torch.abs(outputs.squeeze(1) - labels))
-            absolute_errors = torch.abs(outputs.squeeze(1) - labels)
             running_loss_mse += loss_mse.item() * inputs.size(0)
-            running_loss_mae += loss_mae.item() * inputs.size(0)
-            running_mae += torch.sum(absolute_errors).item()
             total_samples += labels.size(0)
 
     test_loss_mse = running_loss_mse / total_samples
-    test_loss_mae = running_loss_mae / total_samples
-    test_mae = running_mae / total_samples
-    return test_loss_mse, test_loss_mae, test_mae
-
-
-
+    return test_loss_mse
 
 file_path = FILE_PATH
 skip_rows = SKIP_ROWS
@@ -313,35 +269,55 @@ class ChessDataset(Dataset):
         return fens, evals
 
 
-def plot_actual_vs_predicted(model, data_loader, device, is_training=True, percentage=0.1):
-    model.eval()
-    actual_values = []
-    predicted_values = []
 
-    # Calculate the number of samples to plot based on the percentage
-    num_samples = int(len(data_loader.dataset) * percentage)
+
+def plot_actual_vs_predicted(model, train_loader, test_loader, device, max_samples=50):
+    model.eval()
+    actual_train_values = []
+    predicted_train_values = []
+    actual_test_values = []
+    predicted_test_values = []
 
     with torch.no_grad():
-        for inputs, labels in data_loader:
+        # Extract samples from training data
+        for i, (inputs, labels) in enumerate(train_loader):
             inputs, labels = inputs.to(device), labels.to(device)
             outputs = model(inputs)
-            actual_values.extend(labels.cpu().numpy())
-            predicted_values.extend(outputs.cpu().numpy().flatten())
+            actual_train_values.extend(labels.cpu().numpy())
+            predicted_train_values.extend(outputs.cpu().numpy().flatten())
 
-            # Break the loop if we have reached the desired number of samples
-            if len(actual_values) >= num_samples:
+            if len(actual_train_values) >= max_samples:
                 break
 
-    dataset_type = "Training" if is_training else "Testing"
+        # Extract samples from test data
+        for i, (inputs, labels) in enumerate(test_loader):
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            actual_test_values.extend(labels.cpu().numpy())
+            predicted_test_values.extend(outputs.cpu().numpy().flatten())
+
+            if len(actual_test_values) >= max_samples:
+                break
+
+    # Plot for training data
     plt.figure(figsize=(12, 6))
-    plt.plot(actual_values, label='Actual', marker='o', linestyle='', color='b')
-    plt.plot(predicted_values, label='Predicted', marker='x', linestyle='', color='r')
+    plt.plot(actual_train_values, label='Actual (Training)', marker='o', linestyle='', color='b')
+    plt.plot(predicted_train_values, label='Predicted (Training)', marker='x', linestyle='', color='r')
     plt.xlabel('Data Index')
     plt.ylabel('Evaluation')
-    plt.title(f'Actual vs Predicted ({dataset_type} Data - {percentage * 100}% of Dataset)')
+    plt.title(f'Actual vs Predicted (Samples: {max_samples} from Training Data)')
     plt.legend()
     plt.show()
 
+    # Plot for testing data
+    plt.figure(figsize=(12, 6))
+    plt.plot(actual_test_values, label='Actual (Testing)', marker='o', linestyle='', color='g')
+    plt.plot(predicted_test_values, label='Predicted (Testing)', marker='x', linestyle='', color='y')
+    plt.xlabel('Data Index')
+    plt.ylabel('Evaluation')
+    plt.title(f'Actual vs Predicted (Samples: {max_samples} from Testing Data)')
+    plt.legend()
+    plt.show()
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -349,7 +325,6 @@ def main():
 
     chess_data = import_chess_data(file_path, skip_rows, num_rows)
     fen_data, evaluation_data = preprocess_data2(chess_data)
-
 
 
     print("FEN Data:")
@@ -369,7 +344,7 @@ def main():
     # Split data into training and testing sets
     train_ratio = 0.8
     train_size = int(train_ratio * len(chess_data))
-    test_size = int((1-train_ratio)* len(chess_data))
+    test_size = int((1 - train_ratio) * len(chess_data))
     train_data, test_data = chess_data[:train_size], chess_data[train_size:]
 
     train_dataset = ChessDataset(train_data, batch_size=batch_size)
@@ -378,16 +353,18 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=None, shuffle=True, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=None, num_workers=0)
 
-
     # Initialize model, loss function, and optimizer
     model = Net().to(device)
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     start_time = time.time()
+    # Define learning rate scheduler
+    scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=5)
 
     # Train the model
-    train_model(model, criterion, optimizer, train_loader, test_loader, device, num_epochs=num_epochs, batch_size=batch_size, train_size=train_size,test_size=test_size)
+    train_model(model,scheduler, criterion, optimizer, train_loader, test_loader, device, num_epochs=num_epochs,
+                batch_size=batch_size, train_size=train_size, test_size=test_size)
     torch.save(model, 'chessModel.pth')
 
     end_time = time.time()  # Record end time
@@ -398,13 +375,8 @@ def main():
     elapsed_time = "{:02}:{:02}:{:02}".format(int(hours), int(minutes), int(seconds))
     print(f"Elapsed time: {elapsed_time} seconds")
 
-    plot_actual_vs_predicted(model, train_loader, device, is_training=True)
-    plot_actual_vs_predicted(model, test_loader, device, is_training=False)
-
-
-
+    plot_actual_vs_predicted(model, train_loader, test_loader, device, max_samples=50)
 
 
 if __name__ == "__main__":
     main()
-
