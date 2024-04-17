@@ -278,34 +278,7 @@ def evaluate_model(model, criterion, test_loader, device):
     test_mae = running_mae / total_samples
     return test_loss_mse, test_loss_mae, test_mae
 
-def plot_data(dataset, model, device, optimizer, num_epochs, batch_size, lr, trainSize, testSize, name):
-    model.eval()
-    with torch.no_grad():
-        inputs, labels = dataset[:]
-        inputs, labels = inputs.to(device), labels.to(device)
-        outputs = model(inputs).cpu().numpy()
 
-        plt.figure(figsize=(10, 6))
-        plt.scatter(range(len(labels)), labels.cpu().numpy(), label='Actual Evaluation', marker='o')
-        plt.scatter(range(len(outputs)), outputs, label='Predicted Evaluation', marker='x')
-        plt.xlabel('Data Index')
-        plt.ylabel('Evaluation')
-        plt.title('Actual vs Predicted Evaluation')
-        plt.legend()
-
-        # Add model information as text on the right side
-        text = f"Optimizer: {optimizer}\nEpochs: {num_epochs}\nBatch Size: {batch_size}\nLearning Rate: {lr}\nTraining Data Size: {int(trainSize)}\nTest Data Size: {int(testSize)}"
-        plt.text(1.02, 0.5, text, horizontalalignment='left', verticalalignment='center', transform=plt.gca().transAxes)
-
-        # Adjust layout to fit the text and plot within the image
-        plt.subplots_adjust(right=0.7)  # Adjust the space on the right for the text
-        plt.margins(0.2)  # Add some margin around the plot
-
-        # Generate a unique filename with timestamp
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename_mse = f'plots/ValuesGraph-{name}-{timestamp}.png'
-        plt.savefig(filename_mse)
-        plt.show()
 
 
 file_path = FILE_PATH
@@ -338,6 +311,37 @@ class ChessDataset(Dataset):
         evals = torch.Tensor(np.array(evals))
 
         return fens, evals
+
+
+def plot_actual_vs_predicted(model, data_loader, device, is_training=True, percentage=0.1):
+    model.eval()
+    actual_values = []
+    predicted_values = []
+
+    # Calculate the number of samples to plot based on the percentage
+    num_samples = int(len(data_loader.dataset) * percentage)
+
+    with torch.no_grad():
+        for inputs, labels in data_loader:
+            inputs, labels = inputs.to(device), labels.to(device)
+            outputs = model(inputs)
+            actual_values.extend(labels.cpu().numpy())
+            predicted_values.extend(outputs.cpu().numpy().flatten())
+
+            # Break the loop if we have reached the desired number of samples
+            if len(actual_values) >= num_samples:
+                break
+
+    dataset_type = "Training" if is_training else "Testing"
+    plt.figure(figsize=(12, 6))
+    plt.plot(actual_values, label='Actual', marker='o', linestyle='', color='b')
+    plt.plot(predicted_values, label='Predicted', marker='x', linestyle='', color='r')
+    plt.xlabel('Data Index')
+    plt.ylabel('Evaluation')
+    plt.title(f'Actual vs Predicted ({dataset_type} Data - {percentage * 100}% of Dataset)')
+    plt.legend()
+    plt.show()
+
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -391,11 +395,13 @@ def main():
     elapsed_time = end_time - start_time  # Calculate elapsed time
     print(f"Elapsed time: {elapsed_time} seconds")
 
-    plot_data(train_dataset, model, device, 'Adam', num_epochs, batch_size, lr, train_size, test_size, 'trainingData')
-    plot_data(test_dataset, model, device, 'Adam', num_epochs, batch_size, lr, train_size, test_size, 'testData')
+    plot_actual_vs_predicted(model, train_loader, device, is_training=True)
+    plot_actual_vs_predicted(model, test_loader, device, is_training=False)
+
 
 
 
 
 if __name__ == "__main__":
     main()
+
