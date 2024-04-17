@@ -9,6 +9,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
 import datetime
+import time
 
 
 def import_chess_data(file_path, skip_rows=0, num_rows=None):
@@ -374,10 +375,16 @@ def main():
     criterion = nn.MSELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+    start_time = time.time()
 
     # Train the model
     train_model(model, criterion, optimizer, train_loader, test_loader, device, num_epochs=num_epochs, batch_size=batch_size, train_size=train_size,test_size=test_size)
     torch.save(model, 'chessModel.pth')
+
+    end_time = time.time()  # Record end time
+
+    elapsed_time = end_time - start_time  # Calculate elapsed time
+    print(f"Elapsed time: {elapsed_time} seconds")
 
     plot_data(train_dataset, model, device, 'Adam', num_epochs, batch_size, lr, train_size, test_size, 'trainingData')
     plot_data(test_dataset, model, device, 'Adam', num_epochs, batch_size, lr, train_size, test_size, 'testData')
